@@ -25,25 +25,25 @@
     <!-- CONFIG -->
     <section class="panel" aria-label="Configurar cotización">
       <div class="step">
-        <div class="step-h"><span class="step-n">1</span><h2>Banco de óvulos</h2></div>
-        <div class="banks" id="banks"></div>
-      </div>
-
-      <div class="step" id="eggCfg"></div>
-
-      <div class="step">
-        <div class="step-h"><span class="step-n">3</span><h2>Semen de donante <span class="note">(opcional)</span></h2></div>
-        <div class="row">
-          <div class="field"><label class="l" for="spBank">Banco</label>
-            <select id="spBank"><option value="">Sin semen de donante</option><option value="LAFER">LAFER</option><option value="GENEVITY">Genevity (European Sperm Bank)</option></select></div>
-          <div class="field"><label class="l" for="spOrigin">Origen</label><select id="spOrigin" disabled></select></div>
-          <div class="field" style="flex:0 1 110px"><label class="l" for="spQty">Viales</label><input type="number" id="spQty" min="1" max="10" value="1" disabled></div>
+        <div class="step-h"><span class="step-n">1</span><h2>Elige producto</h2></div>
+        <div class="filters">
+          <div class="fgroup"><span class="l">Tipo</span>
+            <div class="seg" role="group" aria-label="Filtro por tipo" id="fTipo">
+              <button data-v="" aria-pressed="true">Todos</button><button data-v="ovulos" aria-pressed="false">Óvulos</button><button data-v="semen" aria-pressed="false">Semen</button>
+            </div></div>
+          <div class="fgroup"><span class="l">Estado</span>
+            <div class="seg" role="group" aria-label="Filtro por estado" id="fEstado">
+              <button data-v="" aria-pressed="true">Todos</button><button data-v="fresco" aria-pressed="false">Fresco</button><button data-v="congelado" aria-pressed="false">Congelado</button>
+            </div></div>
+          <span class="note" id="fCount"></span>
         </div>
-        <div class="note" id="spNote"></div>
+        <div class="companies" id="companies"></div>
       </div>
 
+      <div class="step" id="cfg"></div>
+
       <div class="step">
-        <div class="step-h"><span class="step-n">4</span><h2>Ajustes</h2></div>
+        <div class="step-h"><span class="step-n">3</span><h2>Ajustes</h2></div>
         <div class="row">
           <div class="field"><label class="l" for="patient">Paciente / referencia</label><input type="text" id="patient" placeholder="Ej. Paciente M. López"></div>
           <div class="field" style="flex:0 1 140px"><label class="l" for="disc">Descuento %</label><input type="number" id="disc" min="0" max="30" step="0.5" value="0"></div>
@@ -91,13 +91,12 @@
 
   <!-- FINDER -->
   <section class="panel" aria-label="Buscador por presupuesto">
-    <div><h2>Buscador por presupuesto</h2><div class="note">Para cuando el paciente llega con un monto en mente. Muestra todas las opciones de óvulos que caben, ordenadas por precio por óvulo.</div></div>
+    <div><h2>Buscador por presupuesto</h2><div class="note">Para cuando el paciente llega con un monto en mente. Muestra todas las opciones de óvulos que caben, ordenadas por precio por óvulo. Respeta el filtro de estado (fresco / congelado).</div></div>
     <div class="row">
       <div class="field"><label class="l" for="budget">Presupuesto con IVA (MXN)</label><input type="number" id="budget" step="5000" value="300000"></div>
       <div class="field"><label class="l" for="minEggs">Óvulos mínimos</label><input type="number" id="minEggs" min="0" value="6"></div>
-      <div class="field"><label class="l" for="fType">Tipo</label><select id="fType"><option value="">Todos</option><option value="fresco">Solo fresco</option><option value="congelado">Solo congelado</option></select></div>
     </div>
-    <div class="tbl-wrap"><table><thead><tr><th>Banco</th><th>Opción</th><th class="r">Óvulos</th><th class="r">Total c/IVA</th><th class="r">$/óvulo</th><th>Disponibilidad</th><th></th></tr></thead><tbody id="finder"></tbody></table></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Banco</th><th>Opción</th><th class="r">Óvulos</th><th class="r">Total c/IVA</th><th class="r">$/óvulo</th><th>Estado</th><th>Disponibilidad</th><th></th></tr></thead><tbody id="finder"></tbody></table></div>
   </section>
 
   <section class="panel">
