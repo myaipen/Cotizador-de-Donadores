@@ -1,0 +1,5 @@
+// Configuración del inventario compartido (Google Sheet).
+// Pega aquí la URL de tu Apps Script (termina en /exec). Pasos en LEEME-VENDIDOS.md
+window.FI_CONFIG = {
+  ventasUrl: ""
+};
