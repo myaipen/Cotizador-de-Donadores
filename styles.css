@@ -142,3 +142,11 @@ tr.released td:last-child{text-decoration:none}
 tbody tr.soldout{opacity:1}
 tbody tr.soldout td:not(:nth-child(2)){opacity:.5}
 .btn.soldbtn{white-space:nowrap}
+/* Semen Ovodonors */
+.semf{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.semdet{background:var(--bg);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.semgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px 16px;font-size:13px}
+.semgrid span{display:flex;flex-direction:column;min-width:0}
+.semgrid b{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.pill.cat-e{background:var(--accent);color:var(--accent-fg);border-color:transparent}
+.pill.cat-p{background:var(--accent-soft);color:var(--accent);border-color:transparent}
