@@ -117,3 +117,23 @@ footer{font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);padd
 .line .amt{display:flex;align-items:center;white-space:nowrap}
 .addbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;justify-content:space-between;background:var(--bg);border-radius:10px;padding:10px 12px}
 .addbar .num{font-size:18px}
+
+/* Inventario compartido */
+.hdr-r{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+@media (max-width:560px){.hdr-r{align-items:flex-start}}
+.sync{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:4px 10px}
+.sync .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.sync.on .dot{background:var(--ok)}
+.sync.err .dot{background:var(--bad)}
+.sync.busy .dot{background:var(--warn)}
+tbody tr.soldout{cursor:not-allowed;opacity:.5}
+tbody tr.soldout:hover{background:none}
+.pill.bad{background:transparent;color:var(--bad);border-color:var(--bad)}
+.btn.sell{background:var(--ok);border-color:var(--ok);color:var(--surface)}
+.confirm{border:1px solid var(--ok);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;background:var(--ok-soft)}
+.confirm .eyebrow{color:var(--ok)}
+.btn.mini{font-size:12px;padding:5px 10px}
+.setup{border:1px dashed var(--line);border-radius:12px;padding:14px;font-size:14px;color:var(--muted)}
+.setup code{font-family:var(--mono);font-size:12.5px;color:var(--fg)}
+tr.released td{color:var(--muted);text-decoration:line-through}
+tr.released td:last-child{text-decoration:none}
