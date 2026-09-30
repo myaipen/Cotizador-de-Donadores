@@ -18,7 +18,10 @@
       <h1>Cotizador de Bancos</h1>
       <p>Arma la cotización de óvulos y semen de donante, compara opciones y copia el mensaje para el paciente. Precios referenciales: confirma disponibilidad con Ana o @Rey antes de enviar.</p>
     </div>
-    <label class="toggle"><input type="checkbox" id="internal"> Vista interna (costo y margen)</label>
+    <div class="hdr-r">
+      <span class="sync" id="sync" role="status"><span class="dot"></span><span id="syncTxt">Inventario sin conectar</span></span>
+      <label class="toggle"><input type="checkbox" id="internal"> Vista interna (costo y margen)</label>
+    </div>
   </header>
 
   <div class="grid">
@@ -45,7 +48,8 @@
       <div class="step">
         <div class="step-h"><span class="step-n">3</span><h2>Ajustes</h2></div>
         <div class="row">
-          <div class="field"><label class="l" for="patient">Paciente / referencia</label><input type="text" id="patient" placeholder="Ej. Paciente M. López"></div>
+          <div class="field"><label class="l" for="patient">Paciente / referencia</label><input type="text" id="patient" placeholder="Ej. Exp. 10452 o M. López"></div>
+          <div class="field"><label class="l" for="seller">Ejecutiva</label><input type="text" id="seller" placeholder="Tu nombre"></div>
           <div class="field" style="flex:0 1 140px"><label class="l" for="disc">Descuento %</label><input type="number" id="disc" min="0" max="30" step="0.5" value="0"></div>
         </div>
       </div>
@@ -75,6 +79,12 @@
         <button class="btn" id="addOpt">Agregar a comparación</button>
         <button class="btn ghost" id="copyOne">Copiar mensaje</button>
       </div>
+      <button class="btn sell" id="sellBtn" hidden>Registrar venta</button>
+      <div class="confirm" id="sellBox" hidden>
+        <div class="eyebrow">Confirmar venta</div>
+        <div id="sellTxt" class="note"></div>
+        <div class="btns"><button class="btn" id="sellOk">Confirmar y apartar</button><button class="btn ghost" id="sellNo">Cancelar</button></div>
+      </div>
       <div class="toast" id="toast" role="status"></div>
     </aside>
   </div>
@@ -87,6 +97,15 @@
     </div>
     <div class="cmp" id="cmp"></div>
     <textarea id="msg" readonly aria-label="Mensaje para el paciente"></textarea>
+  </section>
+
+  <!-- VENTAS -->
+  <section class="panel" aria-label="Ventas registradas" id="salesPanel">
+    <div class="step-h" style="justify-content:space-between;flex-wrap:wrap">
+      <div><h2>Ventas registradas · Ovodonors</h2><div class="note">Lo vendido se descuenta del inventario para todas las ejecutivas. Si una venta se cae, toca «Liberar» para que vuelva a estar disponible.</div></div>
+      <button class="btn ghost" id="syncNow">Actualizar</button>
+    </div>
+    <div id="sales"></div>
   </section>
 
   <!-- FINDER -->
@@ -106,6 +125,7 @@
 
   <footer><span id="src"></span> El pago debe realizarse <b>antes</b> de apartar con el proveedor. Precios referenciales; confirmar con Ana o @Rey.</footer>
 </div>
+<script src="config.js"></script>
 <script src="bancos.js"></script>
 <script src="app.js"></script>
 </body>
