@@ -1,5 +1,6 @@
 const IVA = 1.16;
 const { DATA, SPERM, META } = window.FI_DATA;
+const SEM = window.FI_DATA.SEMEN_OVO && window.FI_DATA.SEMEN_OVO.donors && window.FI_DATA.SEMEN_OVO.donors.length ? window.FI_DATA.SEMEN_OVO : null;
 const $ = id => document.getElementById(id);
 const fmt = n => n == null || isNaN(n) ? "—" : "$" + Math.round(n).toLocaleString("es-MX");
 const pct = n => n == null || isNaN(n) ? "N/D" : (n * 100).toFixed(1) + "%";
@@ -18,7 +19,9 @@ const PRODUCTS = [
     from: Math.min(...SPERM.GENEVITY.origins.map(o => o.p)), link: SPERM.GENEVITY.link },
   { id: "OVO_O", co: "OVODONORS", tipo: "ovulos", estados: ["fresco", "congelado"], name: "Óvulos", desc: "Por donante: lote o por óvulo",
     from: Math.min(...DATA.OVO.donors.map(d => d.unit)), fromLabel: "por óvulo", link: DATA.OVO.link },
-  { id: "OVO_S", co: "OVODONORS", tipo: "semen", estados: ["fresco", "congelado"], name: "Semen", desc: "Precio a solicitar con Ana",
+  SEM ? { id: "OVO_S", co: "OVODONORS", tipo: "semen", estados: ["fresco", "congelado"], name: "Semen", desc: `Catálogo por rasgos · ${SEM.donors.length} perfiles`,
+    from: Math.min(...SEM.donors.filter(d => d.estatus !== "Vendido").map(d => d.precio)), link: DATA.OVO.link }
+  : { id: "OVO_S", co: "OVODONORS", tipo: "semen", estados: ["fresco", "congelado"], name: "Semen", desc: "Precio a solicitar con Ana",
     from: null, link: DATA.OVO.link, noPrice: true },
 ];
 const P = id => PRODUCTS.find(p => p.id === id);
@@ -26,6 +29,7 @@ const P = id => PRODUCTS.find(p => p.id === id);
 /* ---------- Estado ---------- */
 const S = {
   fTipo: "", fEstado: "", prod: "OVO_O", showSold: true,
+  sem: { f: {}, edadMin: "", edadMax: "", altMin: "", altMax: "", sel: null, estado: "congelado", sort: "precio", more: false },
   ocpfCat: 0, ocpfQty: 1, ocpcCat: 0, ocpcQty: 6,
   donor: 739, ovoMode: "lote", ovoQty: 6, ovoEstado: "congelado", sort: "unit",
   spOrigin: { LAFER_S: 2, GEN_S: 2 }, spQty: { LAFER_S: 1, GEN_S: 1 },
@@ -93,6 +97,92 @@ async function quickUndo(code, btn) {
   for (const v of quickSold(code)) { const j = await postInv({ action: "liberar", id: v.id, ejecutiva: $("seller").value.trim() }); ok = ok && j.ok }
   toast(ok ? `Donante #${code} disponible otra vez` : "No se pudo reactivar");
 }
+/* ---------- Semen Ovodonors (catálogo por rasgos) ---------- */
+const SEM_F = [
+  ["etnia", "Etnicidad"], ["ojos", "Color de ojos"], ["cabello", "Color de cabello"], ["piel", "Color de piel"], ["categoria", "Categoría"],
+  ["tipoCabello", "Tipo de cabello", 1], ["complexion", "Complexión", 1], ["sangre", "Tipo de sangre", 1], ["tatuajes", "Tatuajes", 1], ["documento", "Documento migratorio", 1]
+];
+const semKey = d => "S-" + d.id;
+const semLeft = d => d.estatus === "Vendido" ? 0 : Math.max(0, 1 - soldOf(semKey(d)));
+const semTokens = (k, v) => k === "ojos" ? String(v).split("/").map(x => x.trim()) : [v];
+function semMatch(d) {
+  const F = S.sem.f;
+  for (const [k] of SEM_F) if (F[k] && !semTokens(k, d[k]).includes(F[k])) return false;
+  const n = (v, x, cmp) => v === "" || v == null || x == null || cmp(x, +v);
+  return n(S.sem.edadMin, d.edad, (x, v) => x >= v) && n(S.sem.edadMax, d.edad, (x, v) => x <= v) &&
+    n(S.sem.altMin, d.altura, (x, v) => x >= v) && n(S.sem.altMax, d.altura, (x, v) => x <= v);
+}
+function semOptions(k) {
+  const c = {};
+  SEM.donors.filter(d => semLeft(d) > 0).forEach(d => semTokens(k, d[k]).forEach(t => { if (t) c[t] = (c[t] || 0) + 1 }));
+  return Object.entries(c).sort((a, b) => b[1] - a[1]);
+}
+function semEnsureSel() {
+  const cur = SEM.donors.find(d => d.id === S.sem.sel);
+  if (cur && semLeft(cur) > 0 && semMatch(cur)) return;
+  const first = SEM.donors.filter(d => semLeft(d) > 0 && semMatch(d)).sort((a, b) => a.precio - b.precio)[0];
+  S.sem.sel = first ? first.id : null;
+}
+function renderSemCfg() {
+  semEnsureSel();
+  const all = SEM.donors.filter(semMatch), avail = all.filter(d => semLeft(d) > 0);
+  const sortF = { precio: (a, b) => a.precio - b.precio, edad: (a, b) => a.edad - b.edad, altura: (a, b) => b.altura - a.altura, id: (a, b) => a.id.localeCompare(b.id) }[S.sem.sort];
+  const rows = all.slice().sort(sortF).sort((a, b) => (semLeft(a) === 0) - (semLeft(b) === 0)).filter(d => S.showSold || semLeft(d) > 0);
+  const sel = SEM.donors.find(d => d.id === S.sem.sel);
+  const estados = S.fEstado ? [S.fEstado] : ["fresco", "congelado"];
+  const sf = ([k, label, more]) => `<div class="field" ${more && !S.sem.more ? "hidden" : ""}><label class="l" for="sf_${k}">${label}</label><select id="sf_${k}" data-k="${k}"><option value="">Cualquiera</option>${semOptions(k).map(([v, n]) => `<option value="${esc(v)}" ${S.sem.f[k] === v ? "selected" : ""}>${esc(v)} (${n})</option>`).join("")}</select></div>`;
+  const nf = (id, label, v) => `<div class="field" ${!S.sem.more ? "hidden" : ""}><label class="l" for="${id}">${label}</label><input type="number" id="${id}" value="${v}" placeholder="—"></div>`;
+  const activeF = Object.values(S.sem.f).filter(Boolean).length + ["edadMin", "edadMax", "altMin", "altMax"].filter(k => S.sem[k] !== "").length;
+  return `<div class="semf">${SEM_F.map(sf).join("")}
+      ${nf("sEdadMin", "Edad mínima", S.sem.edadMin)}${nf("sEdadMax", "Edad máxima", S.sem.edadMax)}${nf("sAltMin", "Altura mín. (cm)", S.sem.altMin)}${nf("sAltMax", "Altura máx. (cm)", S.sem.altMax)}</div>
+    <div class="row" style="align-items:center;justify-content:space-between">
+      <div class="btns"><button class="btn ghost mini" id="semMore">${S.sem.more ? "Menos filtros" : "Más filtros"}</button>${activeF ? `<button class="btn ghost mini" id="semClear">Limpiar filtros (${activeF})</button>` : ""}</div>
+      <span class="note"><b>${avail.length}</b> perfiles disponibles coinciden</span>
+      <div class="fgroup"><div class="seg" role="group" aria-label="Estado de la muestra" id="semEst">${estados.map(e => `<button data-e="${e}" aria-pressed="${S.sem.estado === e}">${cap(e)}</button>`).join("")}</div></div>
+    </div>
+    <div class="tbl-wrap"><table><thead><tr>
+      <th data-ss="id">Perfil</th><th></th><th class="r" data-ss="precio">Precio c/IVA</th><th>Categoría</th><th class="r" data-ss="edad">Edad</th><th>Etnicidad</th><th>Ojos</th><th>Cabello</th><th>Piel</th><th class="r" data-ss="altura">Altura</th><th>Sangre</th>
+    </tr></thead><tbody>${rows.length ? rows.map(d => { const L = semLeft(d);
+      return `<tr data-sid="${d.id}" class="${L === 0 ? "soldout" : d.id === S.sem.sel ? "sel" : ""}"><td class="num">${d.id}</td>
+      <td>${L === 0 ? (quickSold(semKey(d)).length ? `<button class="btn ghost mini" data-sundo="${d.id}">Reactivar</button>` : '<span class="pill bad">Vendido</span>') : `<button class="btn mini soldbtn" data-ssold="${d.id}">Marcar vendido</button>`}</td>
+      <td class="r num">${fmt(d.precio)}</td><td><span class="pill cat-${d.categoria === "Élite" ? "e" : d.categoria === "Premium" ? "p" : "s"}">${esc(d.categoria)}</span></td>
+      <td class="r num">${d.edad ?? "—"}</td><td>${esc(d.etnia)}</td><td>${esc(d.ojos)}</td><td>${esc(d.cabello)}</td><td>${esc(d.piel)}</td><td class="r num">${d.altura ?? "—"}</td><td>${esc(d.sangre)}</td></tr>` }).join("")
+      : `<tr><td colspan="11" class="note" style="white-space:normal">Ningún perfil cumple todos los rasgos. Quita algún filtro (empieza por los de «Más filtros»).</td></tr>`}</tbody></table></div>
+    ${sel ? `<div class="semdet"><div class="eyebrow">Perfil ${sel.id} · ${esc(sel.categoria)}</div>
+      <div class="semgrid">
+        <span><b>Etnicidad</b>${esc(sel.etniaDet || sel.etnia)}</span><span><b>Edad</b>${sel.edad ?? "—"} años</span>
+        <span><b>Altura / peso</b>${sel.altura ?? "—"} cm · ${sel.peso ?? "—"} kg</span><span><b>Complexión</b>${esc(sel.complexion)}</span>
+        <span><b>Ojos / cabello</b>${esc(sel.ojos)} · ${esc(sel.cabello)} ${esc(sel.tipoCabello).toLowerCase()}</span><span><b>Sangre</b>${esc(sel.sangre)}</span>
+        <span><b>Estudios</b>${esc(sel.estudio)}</span><span><b>Ocupación</b>${esc(sel.ocupacion)}</span>
+        <span><b>Tatuajes</b>${esc(sel.tatuajes)}</span><span><b>Documento migratorio</b>${esc(sel.documento)}</span>
+      </div></div>` : ""}
+    <div class="note">Precio = (compensación + envío ${fmt(SEM.envio)}) ÷ (1 − ${Math.round(SEM.margen * 100)}%) × (1 + IVA ${Math.round(SEM.iva * 100)}%). No incluye el tratamiento (IUI / ICI / FIV / ICSI), que se cotiza aparte.</div>`;
+}
+function bindSemCfg(el) {
+  el.querySelectorAll(".semf select").forEach(x => x.onchange = () => { S.sem.f[x.dataset.k] = x.value; renderCfg() });
+  [["sEdadMin", "edadMin"], ["sEdadMax", "edadMax"], ["sAltMin", "altMin"], ["sAltMax", "altMax"]].forEach(([id, k]) => { const i = $(id); if (i) i.onchange = () => { S.sem[k] = i.value; renderCfg() } });
+  const m = $("semMore"); if (m) m.onclick = () => { S.sem.more = !S.sem.more; renderCfg() };
+  const c = $("semClear"); if (c) c.onclick = () => { S.sem.f = {}; S.sem.edadMin = S.sem.edadMax = S.sem.altMin = S.sem.altMax = ""; renderCfg() };
+  el.querySelectorAll("#semEst button").forEach(x => x.onclick = () => { S.sem.estado = x.dataset.e; renderCfg() });
+  el.querySelectorAll("tr[data-sid]:not(.soldout)").forEach(x => x.onclick = () => { S.sem.sel = x.dataset.sid; renderCfg() });
+  el.querySelectorAll("th[data-ss]").forEach(x => x.onclick = () => { S.sem.sort = x.dataset.ss; renderCfg() });
+  el.querySelectorAll("[data-ssold]").forEach(b => b.onclick = ev => { ev.stopPropagation(); semMark(b.dataset.ssold, b) });
+  el.querySelectorAll("[data-sundo]").forEach(b => b.onclick = ev => { ev.stopPropagation(); semUndo(b.dataset.sundo, b) });
+}
+async function semMark(id, btn) {
+  if (!CFG.ventasUrl) { toast("Falta conectar el inventario (config.js) para que todas vean lo vendido"); return }
+  btn.disabled = true; btn.textContent = "Guardando…";
+  const j = await postInv({ action: "vender", items: [{ donante: "S-" + id, cantidad: 1, modalidad: "Marcada vendida", estado: "semen", stock: 1 }],
+    paciente: $("patient").value.trim(), ejecutiva: $("seller").value.trim() || "Sin nombre" });
+  toast(j.ok ? `Perfil de semen ${id} marcado como vendido` : j.error || "No se pudo guardar");
+}
+async function semUndo(id, btn) {
+  btn.disabled = true; btn.textContent = "Guardando…";
+  let ok = true;
+  for (const v of quickSold("S-" + id)) { const j = await postInv({ action: "liberar", id: v.id, ejecutiva: $("seller").value.trim() }); ok = ok && j.ok }
+  toast(ok ? `Perfil ${id} disponible otra vez` : "No se pudo reactivar");
+}
+
 function pickAvailableDonor() {
   const d = DATA.OVO.donors.find(x => x.code === S.donor);
   if (d && leftOf(d) > 0) return;
@@ -110,7 +200,7 @@ function renderSales() {
   el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Donante</th><th class="r">Óvulos</th><th>Modalidad</th><th>Estado</th><th>Ejecutiva</th><th>Status</th><th></th></tr></thead><tbody>${v.map(x => {
     const f = x.fecha ? new Date(x.fecha).toLocaleString("es-MX", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
     const act = x.status === "vendido";
-    return `<tr class="${act ? "" : "released"}" style="cursor:default"><td>${f}</td><td class="num">#${esc(x.donante)}</td><td class="r num">${esc(x.cantidad)}</td><td>${esc(x.modalidad)}</td><td>${esc(x.estado_muestra)}</td><td>${esc(x.ejecutiva)}</td>
+    return `<tr class="${act ? "" : "released"}" style="cursor:default"><td>${f}</td><td class="num">${String(x.donante).startsWith("S-") ? "Semen " + esc(String(x.donante).slice(2)) : "Óvulos #" + esc(x.donante)}</td><td class="r num">${esc(x.cantidad)}</td><td>${esc(x.modalidad)}</td><td>${esc(x.estado_muestra)}</td><td>${esc(x.ejecutiva)}</td>
       <td>${act ? '<span class="pill bad">Vendido</span>' : `<span class="pill">Liberado${x.liberado_por ? " · " + esc(x.liberado_por) : ""}</span>`}</td>
       <td>${act ? `<button class="btn ghost mini" data-rel="${esc(x.id)}">Liberar</button>` : ""}</td></tr>`;
   }).join("")}</tbody></table></div>`;
@@ -196,10 +286,13 @@ function renderCfg() {
         <td>${x.av ? `<span class="pill">${x.av}</span>` : `<span class="pill">Lote completo</span>`}</td></tr>` }).join("")}</tbody></table></div>
       ${soldOut.length ? `<label class="toggle"><input type="checkbox" id="showSold" ${S.showSold ? "checked" : ""}> Mostrar vendidas (${soldOut.length})</label>` : ""}
       <div class="note">«Marcar vendida» marca a la donante como vendida para todas las ejecutivas con un clic. «Reactivar» la regresa a disponible.</div>`;
+  } else if (p.id === "OVO_S" && SEM) {
+    h += renderSemCfg();
   }
   const ln = currentLine();
-  h += `<div class="addbar"><div><div class="note">${ln.label}</div><div class="num">${fmt(ln.p)}</div></div>
-        <button class="btn" id="addLine">Agregar a la cotización</button></div>`;
+  h += ln ? `<div class="addbar"><div><div class="note">${esc(ln.label)}</div><div class="num">${fmt(ln.p)}</div></div>
+        <button class="btn" id="addLine">Agregar a la cotización</button></div>`
+      : `<div class="addbar"><div class="note">Selecciona un perfil disponible para agregarlo.</div><button class="btn" id="addLine" disabled>Agregar a la cotización</button></div>`;
   el.innerHTML = h;
 
   const on = (id, fn) => { const i = $(id); if (i) i.oninput = () => { fn(+i.value); refreshAddbar() } };
@@ -210,16 +303,17 @@ function renderCfg() {
   const so = $("spOrigin"); if (so) so.onchange = () => { S.spOrigin[S.prod] = +so.value; renderCfg() };
   el.querySelectorAll("#ovoMode button").forEach(x => x.onclick = () => { S.ovoMode = x.dataset.m; renderCfg() });
   el.querySelectorAll("#ovoEst button").forEach(x => x.onclick = () => { S.ovoEstado = x.dataset.e; renderCfg() });
-  el.querySelectorAll("tbody tr:not(.soldout)").forEach(x => x.onclick = () => { S.donor = +x.dataset.c; renderCfg() });
+  el.querySelectorAll("tr[data-c]:not(.soldout)").forEach(x => x.onclick = () => { S.donor = +x.dataset.c; renderCfg() });
   el.querySelectorAll("[data-sold]").forEach(b => b.onclick = ev => { ev.stopPropagation(); quickMark(+b.dataset.sold, b) });
   el.querySelectorAll("[data-undo]").forEach(b => b.onclick = ev => { ev.stopPropagation(); quickUndo(+b.dataset.undo, b) });
   const ss = $("showSold"); if (ss) ss.onchange = () => { S.showSold = ss.checked; renderCfg() };
   el.querySelectorAll("th[data-s]").forEach(x => x.onclick = () => { S.sort = x.dataset.s; renderCfg() });
+  if (p.id === "OVO_S" && SEM) bindSemCfg(el);
   $("addLine").onclick = () => { if (addLines()) toast("Agregado a la cotización") };
 }
 function refreshAddbar() {
   const ln = currentLine(), bar = document.querySelector(".addbar");
-  if (bar) { bar.querySelector(".note").textContent = ln.label; bar.querySelector(".num").textContent = fmt(ln.p) }
+  if (bar && ln) { bar.querySelector(".note").textContent = ln.label; bar.querySelector(".num").textContent = fmt(ln.p) }
 }
 
 /* ---------- Construcción de líneas ---------- */
@@ -239,6 +333,12 @@ function currentLine() {
     const q = Math.max(1, Math.min(Math.max(d.eggs, leftOf(d)), S.ovoQty || 1));
     return { co: "OVODONORS", tipo: "ovulos", estado: e, label: `Ovodonors · Óvulos ${e}s · Donante #${d.code} · ${q} óvulos`, p: d.unit * q, cost: d.cost != null ? d.cost / d.eggs * q : null, eggs: q, donor: d.code, mode: "Por óvulo" };
   }
+  if (id === "OVO_S" && SEM) {
+    const d = SEM.donors.find(x => x.id === S.sem.sel);
+    if (!d) return null;
+    const e = S.sem.estado;
+    return { co: "OVODONORS", tipo: "semen", estado: e, label: `Ovodonors · Semen ${e} · Perfil ${d.id} (${d.categoria})`, p: d.precio, cost: d.cost ?? null, eggs: null, semId: d.id, mode: "Semen" };
+  }
   if (id === "LAFER_S" || id === "GEN_S") {
     const src = id === "LAFER_S" ? SPERM.LAFER : SPERM.GENEVITY, o = src.origins[S.spOrigin[id]] || src.origins[0], q = Math.max(1, S.spQty[id] || 1);
     const co = id === "LAFER_S" ? "LAFER" : "GENEVITY";
@@ -247,6 +347,12 @@ function currentLine() {
 }
 function addLines() {
   const ln = currentLine();
+  if (!ln) return false;
+  if (ln.semId) {
+    const d = SEM.donors.find(x => x.id === ln.semId);
+    if (semLeft(d) <= 0) { toast(`El perfil ${d.id} ya está vendido`); return false }
+    if (S.lines.some(l => l.semId === d.id)) { toast(`El perfil ${d.id} ya está en la cotización`); return false }
+  }
   if (ln.donor != null) {
     const d = DATA.OVO.donors.find(x => x.code === ln.donor), free = leftOf(d) - inCart(d.code);
     if (free < ln.eggs) { toast(free <= 0 ? `Donante #${d.code} sin óvulos disponibles` : `Donante #${d.code}: solo quedan ${free} óvulos disponibles`); return false }
@@ -299,7 +405,7 @@ function calc() {
   $("iNote").textContent = (r.margin != null && r.margin < 0.25 ? "Margen bajo 25%: pide autorización antes de aplicar este descuento. " : "") +
     (r.partial ? "Margen calculado solo sobre productos con costo cargado." : "");
   $("addOpt").disabled = S.opts.length >= 4 || !r.lines.length;
-  $("sellBtn").hidden = !CFG.ventasUrl || !S.lines.some(l => l.donor != null);
+  $("sellBtn").hidden = !CFG.ventasUrl || !S.lines.some(l => l.donor != null || l.semId);
   if ($("sellBtn").hidden) $("sellBox").hidden = true;
 }
 
@@ -375,17 +481,18 @@ $("src").innerHTML = `Fuente: ${META.fuente} · ${META.actualizaciones} · Gener
 try { $("seller").value = localStorage.getItem("fi_seller") || "" } catch (e) {}
 $("seller").oninput = () => { try { localStorage.setItem("fi_seller", $("seller").value.trim()) } catch (e) {} };
 $("sellBtn").onclick = () => {
-  const items = S.lines.filter(l => l.donor != null);
+  const items = S.lines.filter(l => l.donor != null || l.semId);
   $("sellTxt").innerHTML = items.map(l => `• ${esc(l.label)}`).join("<br>") +
     `<br><br>Paciente: <b>${esc($("patient").value.trim() || "sin referencia")}</b> · Ejecutiva: <b>${esc($("seller").value.trim() || "sin nombre")}</b>` +
-    `<br>Confirma que el pago ya se recibió: al apartar, estos óvulos dejan de aparecer disponibles para todas.`;
+    `<br>Confirma que el pago ya se recibió: al apartar, estos productos dejan de aparecer disponibles para todas.`;
   $("sellBox").hidden = false; $("sellBtn").hidden = true;
 };
 $("sellNo").onclick = () => { $("sellBox").hidden = true; calc() };
 $("sellOk").onclick = async () => {
   const seller = $("seller").value.trim();
   if (!seller) { toast("Escribe tu nombre en «Ejecutiva» antes de registrar la venta"); $("seller").focus(); return }
-  const items = S.lines.filter(l => l.donor != null).map(l => {
+  const items = S.lines.filter(l => l.donor != null || l.semId).map(l => {
+    if (l.semId) return { donante: "S-" + l.semId, cantidad: 1, modalidad: "Semen", estado: l.estado, stock: 1 };
     const d = DATA.OVO.donors.find(x => x.code === l.donor);
     return { donante: l.donor, cantidad: l.eggs, modalidad: l.mode, estado: l.estado, stock: stockOf(d) };
   });
@@ -393,7 +500,7 @@ $("sellOk").onclick = async () => {
   const j = await postInv({ action: "vender", items, paciente: $("patient").value.trim(), ejecutiva: seller });
   $("sellOk").disabled = false;
   if (j.ok) {
-    S.lines = S.lines.filter(l => l.donor == null); $("sellBox").hidden = true;
+    S.lines = S.lines.filter(l => l.donor == null && !l.semId); $("sellBox").hidden = true;
     renderLines(); calc(); toast("Venta registrada: inventario actualizado para todas");
   } else toast(j.error || "No se pudo registrar la venta");
 };
