@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Genera data/bancos.js a partir del Excel "Directorio de Bancos FI".
+Genera bancos.js a partir del Excel "Directorio de Bancos FI".
 
 Uso:
     pip install openpyxl
-    python scripts/actualizar_datos.py ruta/al/Directorio_Bancos_FI.xlsx
-    python scripts/actualizar_datos.py ruta/al/Directorio_Bancos_FI.xlsx --incluir-costos
+    python actualizar_datos.py ruta/al/Directorio_Bancos_FI.xlsx
+    python actualizar_datos.py ruta/al/Directorio_Bancos_FI.xlsx --incluir-costos
+    python actualizar_datos.py Directorio.xlsx --semen Cotizador_Donantes.xlsx   (agrega catálogo de semen Ovodonors)
 
 Por defecto NO publica costos de proveedor (el sitio en GitHub Pages es público).
 Usa --incluir-costos solo si el repositorio y el sitio son privados.
@@ -19,7 +20,7 @@ try:
 except ImportError:
     sys.exit("Falta openpyxl: pip install openpyxl")
 
-OUT = Path(__file__).resolve().parent.parent / "data" / "bancos.js"
+OUT = Path(__file__).resolve().parent / "bancos.js"
 
 
 def num(v):
@@ -107,15 +108,67 @@ def parse(path):
     return ocpf, ocpc, ovo, lafer, gen, fechas
 
 
+def parse_semen(path):
+    """Lee el 'Cotizador de Donantes' (catálogo de semen OVODONORS)."""
+    wb = openpyxl.load_workbook(path, data_only=True)
+    if "Datos Donantes" not in wb.sheetnames or "Parámetros" not in wb.sheetnames:
+        sys.exit("El archivo de semen debe tener las hojas 'Datos Donantes' y 'Parámetros'.")
+    pr = wb["Parámetros"]
+    envio = num(pr["B6"].value) or 0.0
+    margen = num(pr["B9"].value) if pr["B9"].value is not None else 0.35
+    iva = num(pr["B18"].value) if pr["B18"].value is not None else 0.16
+    ws = wb["Datos Donantes"]
+    head = [clean(c.value) for c in ws[3]]
+    col = {h: i for i, h in enumerate(head)}
+
+    def g(r, name):
+        i = col.get(name)
+        return r[i] if i is not None and i < len(r) else None
+
+    donors = []
+    for r in ws.iter_rows(min_row=4, values_only=True):
+        pid = clean(g(r, "Perfil ID"))
+        comp = num(g(r, "Compensación Económica (MXN)"))
+        if not pid or not comp:
+            continue
+        precio = (comp + envio) / (1 - margen) * (1 + iva)
+        donors.append({
+            "id": pid.zfill(4), "edad": num(g(r, "Edad")), "etnia": clean(g(r, "Etnicidad (Principal)")),
+            "etniaDet": clean(g(r, "Etnicidad (Detalle)")), "complexion": clean(g(r, "Complexión")),
+            "piel": clean(g(r, "Color de Piel")), "ojos": clean(g(r, "Color de Ojos")),
+            "cabello": clean(g(r, "Color de Cabello")), "tipoCabello": clean(g(r, "Tipo de Cabello")),
+            "peso": num(g(r, "Peso (kg)")), "altura": num(g(r, "Altura (cm)")),
+            "sangre": clean(g(r, "Tipo de Sangre")), "estudio": clean(g(r, "Área de Estudio")),
+            "ocupacion": clean(g(r, "Ocupación")), "tatuajes": clean(g(r, "Tatuajes")),
+            "documento": clean(g(r, "Documento Migratorio")), "pais": clean(g(r, "País de Nacimiento")),
+            "categoria": clean(g(r, "Categoría de Donante")), "estatus": clean(g(r, "Estatus")) or "Disponible",
+            "precio": round(precio), "cost": comp + envio,
+        })
+    return {"envio": envio, "margen": margen, "iva": iva, "donors": donors}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("xlsx")
+    ap.add_argument("--semen", help="Excel 'Cotizador de Donantes' (catálogo de semen Ovodonors)")
     ap.add_argument("--incluir-costos", action="store_true")
     a = ap.parse_args()
 
     ocpf, ocpc, ovo, lafer, gen, f = parse(a.xlsx)
 
+    semen = parse_semen(a.semen) if a.semen else None
+    if semen is None and OUT.exists():
+        # conserva el catálogo de semen ya publicado si no se pasa --semen
+        prev = OUT.read_text(encoding="utf-8")
+        try:
+            semen = json.loads(prev[prev.index("{"):prev.rindex(";")]).get("SEMEN_OVO")
+        except Exception:
+            semen = None
+
     if not a.incluir_costos:
+        if semen:
+            for d in semen["donors"]:
+                d["cost"] = None
         for c in ocpc["cats"]:
             c["cost"] = None
         for d in ovo["donors"]:
@@ -131,6 +184,7 @@ def main():
                     "desc": "Por donante: lote o por óvulo", **ovo},
         },
         "SPERM": {"LAFER": {"name": "LAFER", **lafer}, "GENEVITY": {"name": "Genevity", **gen}},
+        "SEMEN_OVO": semen,
         "META": {
             "fuente": "Directorio de Bancos FI",
             "actualizaciones": " · ".join(f"{n} {f[k]}" for n, k in
@@ -140,10 +194,11 @@ def main():
             "costos": a.incluir_costos,
         },
     }
-    OUT.write_text("// Archivo generado por scripts/actualizar_datos.py. No editar a mano.\n"
+    OUT.write_text("// Archivo generado por actualizar_datos.py. No editar a mano.\n"
                    "window.FI_DATA = " + json.dumps(data, ensure_ascii=False, indent=2) + ";\n",
                    encoding="utf-8")
-    print(f"OK → {OUT}  ({len(ovo['donors'])} donantes Ovodonors, costos={'sí' if a.incluir_costos else 'no'})")
+    print(f"OK → {OUT}  ({len(ovo['donors'])} donantes de óvulos, "
+          f"{len(semen['donors']) if semen else 0} donantes de semen, costos={'sí' if a.incluir_costos else 'no'})")
 
 
 if __name__ == "__main__":
