@@ -33,6 +33,80 @@ const S = {
 };
 try { const s = JSON.parse(localStorage.getItem("fi_cot_int") || "null"); if (s != null) $("internal").checked = s } catch (e) {}
 
+/* ---------- Inventario compartido (Google Sheet) ---------- */
+const CFG = window.FI_CONFIG || {};
+const INV = { ventas: [], at: null, err: null, busy: false };
+const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function stockOf(d) {
+  const av = d.av || "", m = av.match(/Disponibles:\s*(\d+)/i);
+  if (m) return +m[1];
+  let t = 0, x; const re = /(\d+)\s*packs?\s*de\s*(\d+)/gi;
+  while ((x = re.exec(av))) t += x[1] * x[2];
+  return t || d.eggs;
+}
+const soldOf = code => INV.ventas.filter(v => v.status === "vendido" && String(v.donante) === String(code)).reduce((s, v) => s + Number(v.cantidad || 0), 0);
+const inCart = code => S.lines.filter(l => l.donor === code).reduce((s, l) => s + l.eggs, 0);
+const leftOf = d => Math.max(0, stockOf(d) - soldOf(d.code));
+const canSell = (d, q) => leftOf(d) - inCart(d.code) >= q;
+function renderSync() {
+  const el = $("sync"), t = $("syncTxt");
+  el.className = "sync" + (!CFG.ventasUrl ? "" : INV.busy ? " busy" : INV.err ? " err" : INV.at ? " on" : " busy");
+  t.textContent = !CFG.ventasUrl ? "Inventario sin conectar" : INV.busy ? "Sincronizando…" : INV.err ? INV.err
+    : INV.at ? `Inventario al día · ${INV.at.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}` : "Conectando…";
+}
+async function loadInv(silent) {
+  if (!CFG.ventasUrl) { renderSync(); renderSales(); return }
+  INV.busy = true; renderSync();
+  try {
+    const r = await fetch(CFG.ventasUrl + (CFG.ventasUrl.includes("?") ? "&" : "?") + "t=" + Date.now());
+    const j = await r.json(); if (!j.ok) throw new Error(j.error || "Respuesta inválida");
+    INV.ventas = j.ventas || []; INV.err = null; INV.at = new Date();
+  } catch (e) { INV.err = "No se pudo leer el inventario" }
+  INV.busy = false; afterInv(silent);
+}
+async function postInv(body) {
+  INV.busy = true; renderSync();
+  try {
+    const r = await fetch(CFG.ventasUrl, { method: "POST", body: JSON.stringify(body) });
+    const j = await r.json(); if (j.ventas) { INV.ventas = j.ventas; INV.at = new Date(); INV.err = null }
+    return j;
+  } catch (e) { return { ok: false, error: "Sin conexión con el inventario. Intenta de nuevo." } }
+  finally { INV.busy = false; afterInv() }
+}
+function afterInv(silent) {
+  renderSync(); renderSales(); finder(); calc();
+  const typing = document.activeElement && $("cfg").contains(document.activeElement) && document.activeElement.tagName === "INPUT";
+  if (!(silent && typing)) { pickAvailableDonor(); renderCfg() }
+}
+function pickAvailableDonor() {
+  const d = DATA.OVO.donors.find(x => x.code === S.donor);
+  if (d && leftOf(d) > 0) return;
+  const alt = DATA.OVO.donors.slice().sort((a, b) => a.unit - b.unit).find(x => leftOf(x) > 0);
+  if (alt) S.donor = alt.code;
+}
+function renderSales() {
+  const el = $("sales");
+  if (!CFG.ventasUrl) {
+    el.innerHTML = `<div class="setup">El registro de ventas aún no está conectado. Para activarlo, sigue los pasos de <code>LEEME-VENDIDOS.md</code> y pega la URL del Apps Script en <code>config.js</code>. Mientras tanto, el cotizador funciona con la disponibilidad del Excel.</div>`;
+    return;
+  }
+  const v = INV.ventas.slice().sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+  if (!v.length) { el.innerHTML = `<div class="empty">Sin ventas registradas todavía. Usa «Registrar venta» en la cotización actual.</div>`; return }
+  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Donante</th><th class="r">Óvulos</th><th>Modalidad</th><th>Estado</th><th>Ejecutiva</th><th>Status</th><th></th></tr></thead><tbody>${v.map(x => {
+    const f = x.fecha ? new Date(x.fecha).toLocaleString("es-MX", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+    const act = x.status === "vendido";
+    return `<tr class="${act ? "" : "released"}" style="cursor:default"><td>${f}</td><td class="num">#${esc(x.donante)}</td><td class="r num">${esc(x.cantidad)}</td><td>${esc(x.modalidad)}</td><td>${esc(x.estado_muestra)}</td><td>${esc(x.ejecutiva)}</td>
+      <td>${act ? '<span class="pill bad">Vendido</span>' : `<span class="pill">Liberado${x.liberado_por ? " · " + esc(x.liberado_por) : ""}</span>`}</td>
+      <td>${act ? `<button class="btn ghost mini" data-rel="${esc(x.id)}">Liberar</button>` : ""}</td></tr>`;
+  }).join("")}</tbody></table></div>`;
+  el.querySelectorAll("[data-rel]").forEach(b => b.onclick = async () => {
+    if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "¿Liberar? Toca otra vez"; setTimeout(() => { if (b.isConnected) { b.dataset.armed = ""; b.textContent = "Liberar" } }, 4000); return }
+    b.disabled = true;
+    const j = await postInv({ action: "liberar", id: b.dataset.rel, ejecutiva: $("seller").value.trim() });
+    toast(j.ok ? "Venta liberada: el inventario vuelve a estar disponible" : j.error || "No se pudo liberar");
+  });
+}
+
 const matches = p => (!S.fTipo || p.tipo === S.fTipo) && (!S.fEstado || p.estados.includes(S.fEstado));
 
 /* ---------- Filtros ---------- */
@@ -89,17 +163,22 @@ function renderCfg() {
       <div class="field" style="flex:0 1 110px"><label class="l" for="spQty">Viales</label><input type="number" id="spQty" min="1" max="10" value="${S.spQty[p.id]}"></div></div>
       <div class="note">${[o.ship ? `Traslado +${fmt(o.ship)} (una vez por envío)` : "", o.t].filter(Boolean).join(" · ")}</div>`;
   } else if (p.id === "OVO_O") {
-    const d = DATA.OVO.donors.slice().sort((a, c) => S.sort === "unit" ? a.unit - c.unit : S.sort === "pack" ? a.pack - c.pack : S.sort === "eggs" ? c.eggs - a.eggs : a.code - c.code);
+    const all = DATA.OVO.donors.slice().sort((a, c) => S.sort === "unit" ? a.unit - c.unit : S.sort === "pack" ? a.pack - c.pack : S.sort === "eggs" ? c.eggs - a.eggs : S.sort === "left" ? leftOf(c) - leftOf(a) : a.code - c.code);
+    const soldOut = all.filter(x => leftOf(x) === 0), d = S.showSold ? all : all.filter(x => leftOf(x) > 0);
     const estados = S.fEstado ? [S.fEstado] : ["fresco", "congelado"];
     h += `<div class="row" style="align-items:flex-end;justify-content:space-between">
         <div class="fgroup"><span class="l">Modalidad</span><div class="seg" role="group" aria-label="Modalidad" id="ovoMode"><button data-m="lote" aria-pressed="${S.ovoMode === "lote"}">Lote completo</button><button data-m="unit" aria-pressed="${S.ovoMode === "unit"}">Por óvulo</button></div></div>
         <div class="fgroup"><span class="l">Estado</span><div class="seg" role="group" aria-label="Estado Ovodonors" id="ovoEst">${estados.map(e => `<button data-e="${e}" aria-pressed="${S.ovoEstado === e}">${cap(e)}</button>`).join("")}</div></div>
-        <div class="field" style="flex:0 1 110px" ${S.ovoMode === "lote" ? "hidden" : ""}><label class="l" for="ovoQty">Óvulos</label><input type="number" id="ovoQty" min="1" max="15" value="${S.ovoQty}"></div>
+        <div class="field" style="flex:0 1 110px" ${S.ovoMode === "lote" ? "hidden" : ""}><label class="l" for="ovoQty">Óvulos</label><input type="number" id="ovoQty" min="1" max="${Math.max(1, leftOf(DATA.OVO.donors.find(x => x.code === S.donor)))}" value="${S.ovoQty}"></div>
       </div>
       <div class="note">Toca una donante para seleccionarla. Ordena tocando el encabezado. Confirma con Ana si la donante está disponible en fresco o congelado.</div>
       <div class="tbl-wrap"><table><thead><tr>
-        <th data-s="code">Donante</th><th class="r" data-s="eggs">Óvulos</th><th class="r" data-s="pack">Lote c/IVA</th><th class="r" data-s="unit">Unit. c/IVA</th><th>Disponibilidad</th>
-      </tr></thead><tbody>${d.map(x => `<tr data-c="${x.code}" class="${x.code === S.donor ? "sel" : ""}"><td class="num">#${x.code}</td><td class="r num">${x.eggs}</td><td class="r num">${fmt(x.pack)}</td><td class="r num">${fmt(x.unit)}</td><td>${x.av ? `<span class="pill ok">${x.av}</span>` : `<span class="pill">Lote completo</span>`}</td></tr>`).join("")}</tbody></table></div>`;
+        <th data-s="code">Donante</th><th class="r" data-s="eggs">Óvulos</th><th class="r" data-s="pack">Lote c/IVA</th><th class="r" data-s="unit">Unit. c/IVA</th><th class="r" data-s="left">Quedan</th><th>Packs (Excel)</th>
+      </tr></thead><tbody>${d.map(x => { const L = leftOf(x), sold = soldOf(x.code);
+        return `<tr data-c="${x.code}" class="${L === 0 ? "soldout" : x.code === S.donor ? "sel" : ""}"><td class="num">#${x.code}</td><td class="r num">${x.eggs}</td><td class="r num">${fmt(x.pack)}</td><td class="r num">${fmt(x.unit)}</td>
+        <td class="r">${L === 0 ? '<span class="pill bad">Vendida</span>' : `<span class="num">${L}</span>${sold ? ` <span class="note">(−${sold})</span>` : ""}`}</td>
+        <td>${x.av ? `<span class="pill">${x.av}</span>` : `<span class="pill">Lote completo</span>`}</td></tr>` }).join("")}</tbody></table></div>
+      ${soldOut.length ? `<label class="toggle"><input type="checkbox" id="showSold" ${S.showSold ? "checked" : ""}> Mostrar vendidas (${soldOut.length})</label>` : ""}`;
   }
   const ln = currentLine();
   h += `<div class="addbar"><div><div class="note">${ln.label}</div><div class="num">${fmt(ln.p)}</div></div>
@@ -114,9 +193,10 @@ function renderCfg() {
   const so = $("spOrigin"); if (so) so.onchange = () => { S.spOrigin[S.prod] = +so.value; renderCfg() };
   el.querySelectorAll("#ovoMode button").forEach(x => x.onclick = () => { S.ovoMode = x.dataset.m; renderCfg() });
   el.querySelectorAll("#ovoEst button").forEach(x => x.onclick = () => { S.ovoEstado = x.dataset.e; renderCfg() });
-  el.querySelectorAll("tbody tr").forEach(x => x.onclick = () => { S.donor = +x.dataset.c; renderCfg() });
+  el.querySelectorAll("tbody tr:not(.soldout)").forEach(x => x.onclick = () => { S.donor = +x.dataset.c; renderCfg() });
+  const ss = $("showSold"); if (ss) ss.onchange = () => { S.showSold = ss.checked; renderCfg() };
   el.querySelectorAll("th[data-s]").forEach(x => x.onclick = () => { S.sort = x.dataset.s; renderCfg() });
-  $("addLine").onclick = () => { addLines(); toast("Agregado a la cotización") };
+  $("addLine").onclick = () => { if (addLines()) toast("Agregado a la cotización") };
 }
 function refreshAddbar() {
   const ln = currentLine(), bar = document.querySelector(".addbar");
@@ -136,9 +216,9 @@ function currentLine() {
   }
   if (id === "OVO_O") {
     const d = DATA.OVO.donors.find(x => x.code === S.donor), e = S.ovoEstado;
-    if (S.ovoMode === "lote") return { co: "OVODONORS", tipo: "ovulos", estado: e, label: `Ovodonors · Óvulos ${e}s · Donante #${d.code} · lote ${d.eggs}`, p: d.pack, cost: d.cost ?? null, eggs: d.eggs };
-    const q = Math.max(1, Math.min(d.eggs, S.ovoQty || 1));
-    return { co: "OVODONORS", tipo: "ovulos", estado: e, label: `Ovodonors · Óvulos ${e}s · Donante #${d.code} · ${q} óvulos`, p: d.unit * q, cost: d.cost != null ? d.cost / d.eggs * q : null, eggs: q };
+    if (S.ovoMode === "lote") return { co: "OVODONORS", tipo: "ovulos", estado: e, label: `Ovodonors · Óvulos ${e}s · Donante #${d.code} · lote ${d.eggs}`, p: d.pack, cost: d.cost ?? null, eggs: d.eggs, donor: d.code, mode: "Lote completo" };
+    const q = Math.max(1, Math.min(Math.max(d.eggs, leftOf(d)), S.ovoQty || 1));
+    return { co: "OVODONORS", tipo: "ovulos", estado: e, label: `Ovodonors · Óvulos ${e}s · Donante #${d.code} · ${q} óvulos`, p: d.unit * q, cost: d.cost != null ? d.cost / d.eggs * q : null, eggs: q, donor: d.code, mode: "Por óvulo" };
   }
   if (id === "LAFER_S" || id === "GEN_S") {
     const src = id === "LAFER_S" ? SPERM.LAFER : SPERM.GENEVITY, o = src.origins[S.spOrigin[id]] || src.origins[0], q = Math.max(1, S.spQty[id] || 1);
@@ -148,10 +228,14 @@ function currentLine() {
 }
 function addLines() {
   const ln = currentLine();
+  if (ln.donor != null) {
+    const d = DATA.OVO.donors.find(x => x.code === ln.donor), free = leftOf(d) - inCart(d.code);
+    if (free < ln.eggs) { toast(free <= 0 ? `Donante #${d.code} sin óvulos disponibles` : `Donante #${d.code}: solo quedan ${free} óvulos disponibles`); return false }
+  }
   S.lines.push(ln);
   if (ln.ship && !S.lines.some(l => l.isShip && l.co === ln.co))
     S.lines.push({ co: ln.co, tipo: "semen", estado: "", label: `${ln.co} · Traslado de muestra`, p: ln.ship, cost: null, eggs: null, isShip: true });
-  calc(); renderLines();
+  calc(); renderLines(); return true;
 }
 
 /* ---------- Totales ---------- */
@@ -196,6 +280,8 @@ function calc() {
   $("iNote").textContent = (r.margin != null && r.margin < 0.25 ? "Margen bajo 25%: pide autorización antes de aplicar este descuento. " : "") +
     (r.partial ? "Margen calculado solo sobre productos con costo cargado." : "");
   $("addOpt").disabled = S.opts.length >= 4 || !r.lines.length;
+  $("sellBtn").hidden = !CFG.ventasUrl || !S.lines.some(l => l.donor != null);
+  if ($("sellBtn").hidden) $("sellBox").hidden = true;
 }
 
 /* ---------- Comparación y mensajes ---------- */
@@ -237,8 +323,9 @@ function finder() {
   DATA.OCPF.cats.forEach((c, i) => rows.push({ bank: "OCP", est: ["fresco"], opt: `${c.c} · 1 paquete`, eggs: null, total: c.p, av: "Confirmar con OCP", set: () => { S.prod = "OCP_F"; S.ocpfCat = i; S.ocpfQty = 1 } }));
   DATA.OVO.donors.forEach(d => {
     const set = (mode, q) => () => { S.prod = "OVO_O"; S.donor = d.code; S.ovoMode = mode; if (q) S.ovoQty = q; if (t) S.ovoEstado = t };
-    rows.push({ bank: "OVODONORS", est: ["fresco", "congelado"], opt: `#${d.code} · lote`, eggs: d.eggs, total: d.pack, av: d.av || "Lote completo", set: set("lote") });
-    if (d.av && m > 0 && m < d.eggs) rows.push({ bank: "OVODONORS", est: ["fresco", "congelado"], opt: `#${d.code} · ${m} óvulos`, eggs: m, total: d.unit * m, av: d.av, set: set("unit", m) });
+    const L = leftOf(d);
+    if (L >= d.eggs) rows.push({ bank: "OVODONORS", est: ["fresco", "congelado"], opt: `#${d.code} · lote`, eggs: d.eggs, total: d.pack, av: `Quedan ${L}`, set: set("lote") });
+    if (d.av && m > 0 && m < d.eggs && L >= m) rows.push({ bank: "OVODONORS", est: ["fresco", "congelado"], opt: `#${d.code} · ${m} óvulos`, eggs: m, total: d.unit * m, av: `Quedan ${L}`, set: set("unit", m) });
   });
   const f = rows.filter(r => r.total <= B && (!t || r.est.includes(t)) && (r.eggs == null || r.eggs >= m))
     .sort((a, b) => (a.eggs ? a.total / a.eggs : Infinity) - (b.eggs ? b.total / b.eggs : Infinity) || a.total - b.total);
@@ -266,6 +353,35 @@ $("links").innerHTML = [["OCP Fresco", DATA.OCPF.link], ["OCP Congelado", DATA.O
 if (!META.costos) { $("internal").checked = false; $("internal").closest("label").hidden = true }
 $("src").innerHTML = `Fuente: ${META.fuente} · ${META.actualizaciones} · Generado ${META.generado}.`;
 
+try { $("seller").value = localStorage.getItem("fi_seller") || "" } catch (e) {}
+$("seller").oninput = () => { try { localStorage.setItem("fi_seller", $("seller").value.trim()) } catch (e) {} };
+$("sellBtn").onclick = () => {
+  const items = S.lines.filter(l => l.donor != null);
+  $("sellTxt").innerHTML = items.map(l => `• ${esc(l.label)}`).join("<br>") +
+    `<br><br>Paciente: <b>${esc($("patient").value.trim() || "sin referencia")}</b> · Ejecutiva: <b>${esc($("seller").value.trim() || "sin nombre")}</b>` +
+    `<br>Confirma que el pago ya se recibió: al apartar, estos óvulos dejan de aparecer disponibles para todas.`;
+  $("sellBox").hidden = false; $("sellBtn").hidden = true;
+};
+$("sellNo").onclick = () => { $("sellBox").hidden = true; calc() };
+$("sellOk").onclick = async () => {
+  const seller = $("seller").value.trim();
+  if (!seller) { toast("Escribe tu nombre en «Ejecutiva» antes de registrar la venta"); $("seller").focus(); return }
+  const items = S.lines.filter(l => l.donor != null).map(l => {
+    const d = DATA.OVO.donors.find(x => x.code === l.donor);
+    return { donante: l.donor, cantidad: l.eggs, modalidad: l.mode, estado: l.estado, stock: stockOf(d) };
+  });
+  $("sellOk").disabled = true;
+  const j = await postInv({ action: "vender", items, paciente: $("patient").value.trim(), ejecutiva: seller });
+  $("sellOk").disabled = false;
+  if (j.ok) {
+    S.lines = S.lines.filter(l => l.donor == null); $("sellBox").hidden = true;
+    renderLines(); calc(); toast("Venta registrada: inventario actualizado para todas");
+  } else toast(j.error || "No se pudo registrar la venta");
+};
+$("syncNow").onclick = () => loadInv();
+setInterval(() => { if (!document.hidden) loadInv(true) }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) loadInv(true) });
+
 /* ---------- Estado inicial de ejemplo: dos opciones precargadas ---------- */
 S.prod = "OVO_O"; S.donor = 739; S.ovoMode = "lote"; addLines();
 S.prod = "LAFER_S"; addLines();
@@ -274,4 +390,4 @@ S.prod = "OVO_O"; S.donor = 424; S.ovoMode = "unit"; S.ovoQty = 6; addLines();
 S.prod = "GEN_S"; addLines();
 S.opts.push(build());
 S.prod = "OVO_O"; S.donor = 739; S.ovoMode = "lote";
-renderCompanies(); renderCfg(); renderLines(); calc(); renderOpts(); finder();
+renderCompanies(); renderCfg(); renderLines(); calc(); renderOpts(); finder(); renderSync(); renderSales(); loadInv();
